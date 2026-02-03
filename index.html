@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kochi Stellar Tide - 悠久の暦</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@200;300;400&family=Lato:wght@300&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg-color: #010105; --text-color: #e6f3ff; --accent-color: #b3d9ff; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--bg-color); color: var(--text-color); font-family: 'Noto Serif JP', serif; overflow: hidden; }
+        canvas { position: fixed; top: 0; left: 0; z-index: 1; }
+        #content { position: relative; z-index: 2; padding: 6vh 6vw; display: flex; flex-direction: column; justify-content: space-between; height: 100vh; box-sizing: border-box; pointer-events: none; }
+        .header { border-left: 1px solid rgba(255,255,255,0.2); padding-left: 20px; pointer-events: auto; }
+        .era-title { font-size: 1.6rem; letter-spacing: 0.3em; font-weight: 200; }
+        .lunar-title { font-size: 0.9rem; opacity: 0.6; letter-spacing: 0.2em; margin-top: 8px; }
+        .main-display { max-width: 650px; pointer-events: auto; cursor: pointer; transition: 0.5s ease; }
+        .main-display:hover { transform: translateY(-5px); }
+        .astro-label { font-size: 0.7rem; letter-spacing: 0.6em; color: var(--accent-color); opacity: 0.8; margin-bottom: 20px; display: block; }
+        #astro-title { font-size: 3.2rem; margin: 0; font-weight: 200; line-height: 1.4; text-shadow: 0 0 20px rgba(255,255,255,0.2); }
+        #astro-sub { font-size: 1.05rem; opacity: 0.8; margin-top: 25px; line-height: 2.2; letter-spacing: 0.05em; font-weight: 300; }
+        #modal { display: none; position: fixed; z-index: 100; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); backdrop-filter: blur(20px); justify-content: center; align-items: center; }
+        #modal.show { display: flex; animation: fadeIn 0.8s ease; }
+        .modal-body { max-width: 500px; padding: 50px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <canvas id="sky-canvas"></canvas>
+    <div id="content">
+        <div class="header">
+            <div class="era-title" id="era-display"></div>
+            <div class="lunar-title">旧暦：<span id="lunar-display"></span> ／ 土佐之國 高知</div>
+        </div>
+        <div class="main-display" id="trigger-modal">
+            <span class="astro-label">今夜、貴方に見せたい星</span>
+            <h1 id="astro-title">Loading...</h1>
+            <p id="astro-sub"></p>
+            <div style="margin-top: 40px; font-family: 'Lato'; font-size: 0.7rem; letter-spacing: 0.4em; opacity: 0.4;">Koyomi & Starlight</div>
+        </div>
+        <div style="font-size: 0.6rem; opacity: 0.3; letter-spacing: 0.2em; display: flex; justify-content: space-between;">
+            <span>STARRY TALE OF KOCHI</span>
+            <span id="digital-clock"></span>
+        </div>
+    </div>
+    <div id="modal">
+        <div class="modal-body">
+            <h2 id="modal-title" style="font-weight: 200; font-size: 2.2rem; margin-bottom: 30px;"></h2>
+            <p id="modal-desc" style="line-height: 2.2; opacity: 0.9; font-weight: 300;"></p>
+            <div id="close-modal" style="cursor:pointer; margin-top:40px; text-align:right; font-size:0.7rem; letter-spacing:0.3em; opacity:0.5;">閉じる [×]</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('sky-canvas');
+        const ctx = canvas.getContext('2d');
+        let stars = [], shootingStars = [];
+
+        // --- 1. 日替わり天文データ (365日対応のベース) ---
+        const ASTRO_DATA = {
+            "02-03": { title: "幸を運ぶ、布良星", desc: "節分の夜、高知の南の水平線に現れるカノープス。別名『布良星』。一度見れば長寿を授かると言われる伝説の一等星です。冬の終わりを告げる、静かな光に願いを託して。" },
+            "02-04": { title: "立春、はじまりの明星", desc: "今日から暦の上では春。夕暮れの西の空には金星が輝き、高知の厳しい冬が明けようとしています。寒さの中に混じる春の匂いを感じながら、新しい星空の始まりを見上げましょう。" },
+            "02-05": { title: "しし座のレグルス", desc: "東の空に、春の星座の王『しし座』が姿を現します。その心臓に輝くレグルスは『小さな王』という意味。高知の夜も、少しずつ春の華やかさを帯びていきます。" },
+            "default": { title: "高知の冬銀河", desc: "冬の夜空を彩る大三角が天頂に輝いています。鏡川のせせらぎ、あるいは太平洋の波音。高知の風景とともに、この星空は今も昔も変わりなく続いています。" }
+        };
+
+        function updateDisplay() {
+            const now = new Date();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const date = String(now.getDate()).padStart(2, '0');
+            const key = `${month}-${date}`;
+
+            // 和暦の取得
+            const era = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(now);
+            document.getElementById('era-display').innerText = era;
+
+            // 旧暦の簡易計算（月の名前）
+            const lunarNames = ["師走", "睦月", "如月", "弥生", "卯月", "皐月", "水無月", "文月", "葉月", "長月", "神無月", "霜月"];
+            // 2026年2月は「師走」から「睦月(正月)」への過渡期
+            let lunarDay = (now.getDate() + 14); // 簡易近似
+            document.getElementById('lunar-display').innerText = `乙巳 ${lunarNames[now.getMonth()]} ${lunarDay}日`;
+
+            // 天文情報
+            const info = ASTRO_DATA[key] || ASTRO_DATA["default"];
+            document.getElementById('astro-title').innerText = info.title;
+            document.getElementById('astro-sub').innerText = info.desc;
+            document.getElementById('modal-title').innerText = info.title;
+            document.getElementById('modal-desc').innerText = info.desc;
+            document.getElementById('digital-clock').innerText = now.toLocaleTimeString('ja-JP', {hour12:false});
+        }
+
+        // --- 2. 星空アニメーション ---
+        function initSky() {
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            stars = Array.from({length: 400}, () => ({
+                x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+                size: Math.random()*1.3, opacity: Math.random(), blink: Math.random()*0.015
+            }));
+        }
+
+        function createShootingStar() {
+            const angle = Math.PI / 4 + (Math.random() - 0.5) * 0.15;
+            shootingStars.push({
+                x: Math.random()*canvas.width*0.8, y: 0,
+                len: Math.random()*120+60, speed: Math.random()*7+5,
+                opacity: 1, size: Math.random()*1.8+0.5, angle: angle
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(1, 1, 5, 0.2)'; // 感情的な残像を残す
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            stars.forEach(s => {
+                s.opacity += s.blink; if(s.opacity>1 || s.opacity<0.1) s.blink*=-1;
+                ctx.fillStyle = `rgba(230, 243, 255, ${s.opacity})`;
+                ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
+            });
+            shootingStars.forEach((ss, i) => {
+                ctx.save();
+                ctx.strokeStyle = `rgba(255, 255, 255, ${ss.opacity})`;
+                ctx.lineWidth = ss.size; ctx.lineCap = 'round';
+                ctx.shadowBlur = 8; ctx.shadowColor = 'white';
+                ctx.beginPath(); ctx.moveTo(ss.x, ss.y);
+                ctx.lineTo(ss.x + Math.cos(ss.angle)*ss.len, ss.y + Math.sin(ss.angle)*ss.len);
+                ctx.stroke(); ctx.restore();
+                ss.x += Math.cos(ss.angle)*ss.speed; ss.y += Math.sin(ss.angle)*ss.speed;
+                ss.opacity -= 0.012; if(ss.opacity <= 0) shootingStars.splice(i, 1);
+            });
+            requestAnimationFrame(draw);
+        }
+
+        // 8秒前後の周期で流れ星を生成
+        setInterval(createShootingStar, 8500);
+        document.getElementById('trigger-modal').onclick = () => document.getElementById('modal').classList.add('show');
+        document.getElementById('close-modal').onclick = () => document.getElementById('modal').classList.remove('show');
+        window.addEventListener('resize', initSky);
+        initSky(); draw(); updateDisplay();
+        setInterval(updateDisplay, 1000); // 1秒ごとに更新して時計も動かす
+    </script>
+</body>
+</html>
