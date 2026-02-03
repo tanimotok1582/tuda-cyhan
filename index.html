@@ -35,7 +35,7 @@
             <span class="astro-label">今夜、貴方に見せたい星</span>
             <h1 id="astro-title">Loading...</h1>
             <p id="astro-sub"></p>
-            <div style="margin-top: 40px; font-family: 'Lato'; font-size: 0.7rem; letter-spacing: 0.4em; opacity: 0.4;">Koyomi & Starlight</div>
+            <div style="margin-top: 40px; font-family: 'Lato'; font-size: 0.7rem; letter-spacing: 0.4em; opacity: 0.4;">Koyomi & Starlight - Tap to Hear the Sea</div>
         </div>
         <div style="font-size: 0.6rem; opacity: 0.3; letter-spacing: 0.2em; display: flex; justify-content: space-between;">
             <span>STARRY TALE OF KOCHI</span>
@@ -54,8 +54,9 @@
         const canvas = document.getElementById('sky-canvas');
         const ctx = canvas.getContext('2d');
         let stars = [], shootingStars = [];
+        let audioCtx;
 
-        // --- 1. 日替わり天文データ (365日対応のベース) ---
+        // --- 1. 天文データ ---
         const ASTRO_DATA = {
             "02-03": { title: "幸を運ぶ、布良星", desc: "節分の夜、高知の南の水平線に現れるカノープス。別名『布良星』。一度見れば長寿を授かると言われる伝説の一等星です。冬の終わりを告げる、静かな光に願いを託して。" },
             "02-04": { title: "立春、はじまりの明星", desc: "今日から暦の上では春。夕暮れの西の空には金星が輝き、高知の厳しい冬が明けようとしています。寒さの中に混じる春の匂いを感じながら、新しい星空の始まりを見上げましょう。" },
@@ -63,23 +64,70 @@
             "default": { title: "高知の冬銀河", desc: "冬の夜空を彩る大三角が天頂に輝いています。鏡川のせせらぎ、あるいは太平洋の波音。高知の風景とともに、この星空は今も昔も変わりなく続いています。" }
         };
 
+        // --- 2. BGM: 波音の生成 (Web Audio API) ---
+        function playOceanSweep() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            const createWave = () => {
+                const bufferSize = audioCtx.sampleRate * 6;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+                const noise = audioCtx.createBufferSource();
+                const filter = audioCtx.createBiquadFilter();
+                const gain = audioCtx.createGain();
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(300, audioCtx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 3);
+
+                gain.gain.setValueAtTime(0, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 3);
+                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 6);
+
+                noise.buffer = buffer;
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(audioCtx.destination);
+                noise.start();
+            };
+
+            setInterval(createWave, 7000);
+            createWave();
+        }
+
+        // --- 3. 月齢計算 ---
+        function getLunarInfo(date) {
+            const baseDate = new Date(1970, 0, 7);
+            const diff = (date - baseDate) / (24 * 60 * 60 * 1000);
+            const age = diff % 29.53;
+            let icon = "";
+            if (age < 1.8) icon = "🌑";
+            else if (age < 5.5) icon = "🌒";
+            else if (age < 9.2) icon = "🌓";
+            else if (age < 13.0) icon = "🌔";
+            else if (age < 16.6) icon = "🌕";
+            else if (age < 20.3) icon = "🌖";
+            else if (age < 24.0) icon = "🌗";
+            else icon = "🌘";
+            return { age: Math.floor(age), icon: icon };
+        }
+
         function updateDisplay() {
             const now = new Date();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const date = String(now.getDate()).padStart(2, '0');
             const key = `${month}-${date}`;
 
-            // 和暦の取得
             const era = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(now);
             document.getElementById('era-display').innerText = era;
 
-            // 旧暦の簡易計算（月の名前）
+            const lunar = getLunarInfo(now);
             const lunarNames = ["師走", "睦月", "如月", "弥生", "卯月", "皐月", "水無月", "文月", "葉月", "長月", "神無月", "霜月"];
-            // 2026年2月は「師走」から「睦月(正月)」への過渡期
-            let lunarDay = (now.getDate() + 14); // 簡易近似
-            document.getElementById('lunar-display').innerText = `乙巳 ${lunarNames[now.getMonth()]} ${lunarDay}日`;
+            document.getElementById('lunar-display').innerText = `${lunar.icon} 乙巳 ${lunarNames[now.getMonth()]} ${lunar.age}日`;
 
-            // 天文情報
             const info = ASTRO_DATA[key] || ASTRO_DATA["default"];
             document.getElementById('astro-title').innerText = info.title;
             document.getElementById('astro-sub').innerText = info.desc;
@@ -88,12 +136,14 @@
             document.getElementById('digital-clock').innerText = now.toLocaleTimeString('ja-JP', {hour12:false});
         }
 
-        // --- 2. 星空アニメーション ---
+        // --- 4. 星空演出 ---
         function initSky() {
             canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            const colors = ['#e6f3ff', '#ffffff', '#ffd9b3', '#b3d9ff'];
             stars = Array.from({length: 400}, () => ({
                 x: Math.random()*canvas.width, y: Math.random()*canvas.height,
-                size: Math.random()*1.3, opacity: Math.random(), blink: Math.random()*0.015
+                size: Math.random()*1.3, opacity: Math.random(), blink: Math.random()*0.015,
+                color: colors[Math.floor(Math.random() * colors.length)]
             }));
         }
 
@@ -107,13 +157,17 @@
         }
 
         function draw() {
-            ctx.fillStyle = 'rgba(1, 1, 5, 0.2)'; // 感情的な残像を残す
+            ctx.fillStyle = 'rgba(1, 1, 5, 0.2)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
             stars.forEach(s => {
                 s.opacity += s.blink; if(s.opacity>1 || s.opacity<0.1) s.blink*=-1;
-                ctx.fillStyle = `rgba(230, 243, 255, ${s.opacity})`;
+                ctx.fillStyle = s.color;
+                ctx.globalAlpha = s.opacity;
                 ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
             });
+            ctx.globalAlpha = 1.0;
+
             shootingStars.forEach((ss, i) => {
                 ctx.save();
                 ctx.strokeStyle = `rgba(255, 255, 255, ${ss.opacity})`;
@@ -128,13 +182,16 @@
             requestAnimationFrame(draw);
         }
 
-        // 8秒前後の周期で流れ星を生成
         setInterval(createShootingStar, 8500);
-        document.getElementById('trigger-modal').onclick = () => document.getElementById('modal').classList.add('show');
+        document.getElementById('trigger-modal').onclick = () => {
+            document.getElementById('modal').classList.add('show');
+            playOceanSweep();
+        };
         document.getElementById('close-modal').onclick = () => document.getElementById('modal').classList.remove('show');
         window.addEventListener('resize', initSky);
+        
         initSky(); draw(); updateDisplay();
-        setInterval(updateDisplay, 1000); // 1秒ごとに更新して時計も動かす
+        setInterval(updateDisplay, 1000);
     </script>
 </body>
 </html>
