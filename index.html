@@ -14,7 +14,7 @@
             --bg-color: #010105; 
             --text-color: #e6f3ff; 
             --accent-color: #b3d9ff; 
-            --clock-color: #ffffff; /* 時計用の明るい色を追加 */
+            --clock-color: #ffffff;
             --transition-smooth: 1.2s cubic-bezier(0.2, 1, 0.3, 1);
         }
 
@@ -24,7 +24,7 @@
             -webkit-font-smoothing: antialiased;
         }
 
-        .weather-panel, .index-value, .footer, #digital-clock {
+        .footer, #digital-clock, #koki-display {
             font-family: 'Lato', 'Noto Serif JP', serif;
         }
         
@@ -48,10 +48,10 @@
         
         .header, .main-display, .footer { pointer-events: auto; }
 
+        /* 左上の情報セクション */
         .location-info { border-left: 1px solid rgba(255,255,255,0.2); padding-left: 15px; }
-        .era-title { font-size: clamp(1rem, 4vw, 1.4rem); letter-spacing: 0.3em; }
-        .weather-panel { text-align: right; }
-        .index-value { font-size: 2.2rem; color: var(--accent-color); text-shadow: 0 0 15px rgba(179, 217, 255, 0.4); }
+        .era-title { font-size: clamp(1rem, 4vw, 1.4rem); letter-spacing: 0.3em; margin-bottom: 5px; }
+        .koki-label { font-size: 0.8rem; opacity: 0.6; letter-spacing: 0.1em; }
 
         .main-display { 
             max-width: 800px; cursor: pointer; transition: var(--transition-smooth); 
@@ -64,7 +64,6 @@
         #astro-title { font-size: clamp(2rem, 8vw, 3.5rem); margin: 0; line-height: 1.4; letter-spacing: 0.1em; }
         #astro-sub { font-size: clamp(0.85rem, 2.5vw, 1rem); opacity: 0.7; margin-top: 25px; line-height: 2.5; max-width: 550px; }
 
-        /* フッターと時計の視認性を改善 */
         .footer { font-size: 0.7rem; opacity: 0.6; letter-spacing: 0.2em; display: flex; justify-content: space-between; align-items: center; }
         #digital-clock { 
             font-size: 0.9rem; 
@@ -75,13 +74,13 @@
         }
 
         #modal { 
-            display: flex; position: fixed; z-index: 100; top: 0; left: 0; width: 100%; height: 100%; 
+            display: none; position: fixed; z-index: 100; top: 0; left: 0; width: 100%; height: 100%; 
             background: rgba(0,0,0,0.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             justify-content: center; align-items: center; 
-            opacity: 0; visibility: hidden;
-            transition: opacity 0.8s ease, visibility 0.8s ease;
+            opacity: 0; 
+            transition: opacity 0.8s ease;
         }
-        #modal.show { opacity: 1; visibility: visible; pointer-events: auto; }
+        #modal.show { display: flex; opacity: 1; pointer-events: auto; }
         
         .modal-body { 
             max-width: 90%; width: 520px; padding: 60px; 
@@ -99,18 +98,14 @@
         <header class="header">
             <div class="location-info">
                 <div class="era-title" id="era-display">--</div>
-                <div style="font-size: 0.8rem; opacity: 0.6; margin-top: 8px;">
+                <div class="koki-label">皇紀 <span id="koki-year">----</span> 年</div>
+                <div style="font-size: 0.8rem; opacity: 0.6; margin-top: 12px;">
                     <span id="lunar-icon" aria-hidden="true"></span> <span id="lunar-status">計算中...</span>
                 </div>
             </div>
-            <div class="weather-panel">
-                <div style="font-size: 0.6rem; letter-spacing: 0.2em; opacity: 0.6;">STARGAZING INDEX</div>
-                <div class="index-value" id="star-index">--</div>
-                <div id="weather-desc" style="font-size: 0.7rem; opacity: 0.7; margin-top: 4px;">Loading...</div>
-            </div>
         </header>
 
-        <button class="main-display" id="trigger-modal" aria-label="詳細を表示">
+        <button class="main-display" id="trigger-modal">
             <span class="astro-label">TONIGHT'S STELLAR STORY</span>
             <h1 id="astro-title">高知の星空</h1>
             <p id="astro-sub">読み込み中...</p>
@@ -134,7 +129,6 @@
     <script>
         const CONFIG = {
             coords: { lat: 33.5597, lon: 133.5311 },
-            apiKey: 'YOUR_API_KEY_HERE',
             astroData: {
                 "02-04": { title: "立春の明星", desc: "暦が春へと切り替わる今夜。高知の空には、新しい季節の始まりを告げる明星が輝いています。太平洋から吹き込む風も、どこか柔らかな質感を含み始めます。" },
                 "default": { title: "土佐の深淵なる星空", desc: "鏡川のせせらぎ、あるいは太平洋の波音。高知の夜を彩る無数の星々は、時代を超えて同じ光を届けています。" }
@@ -143,11 +137,18 @@
 
         const state = { timers: [], audioCtx: null };
 
-        async function updateEnvironment() {
+        function updateEnvironment() {
             const now = new Date();
+            
+            // 和暦の取得
             const era = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(now);
             document.getElementById('era-display').innerText = era;
 
+            // 皇紀の計算 (西暦 + 660)
+            const kokiYear = now.getFullYear() + 660;
+            document.getElementById('koki-year').innerText = kokiYear;
+
+            // 現実の月齢計算 (高知の座標に基づいたシミュレーション)
             try {
                 const moon = SunCalc.getMoonIllumination(now);
                 const moonIcons = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"];
@@ -161,20 +162,9 @@
             document.getElementById('astro-sub').innerText = info.desc;
             document.getElementById('modal-title').innerText = info.title;
             document.getElementById('modal-desc').innerText = info.desc;
-
-            try {
-                let weather = (CONFIG.apiKey.includes('YOUR')) 
-                    ? {clouds: 2, humidity: 40, desc: "澄み渡る夜"} 
-                    : await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${CONFIG.coords.lat}&lon=${CONFIG.coords.lon}&appid=${CONFIG.apiKey}&units=metric&lang=ja`).then(r => r.json()).then(d => ({clouds: d.clouds.all, humidity: d.main.humidity, desc: d.weather[0].description}));
-                
-                document.getElementById('star-index').innerText = Math.floor(Math.max(0, 100 - (weather.clouds * 0.8) - (weather.humidity * 0.1)));
-                document.getElementById('weather-desc').innerText = `雲量 ${weather.clouds}% / ${weather.desc}`;
-            } catch (err) {
-                document.getElementById('star-index').innerText = "--";
-                document.getElementById('weather-desc').innerText = "Offline Mode";
-            }
         }
 
+        // --- 視覚演出 (Canvas & Animation) ---
         const canvas = document.getElementById('sky-canvas');
         const ctx = canvas.getContext('2d');
         let stars = [], shootingStars = [];
@@ -213,6 +203,7 @@
             requestAnimationFrame(draw);
         }
 
+        // --- オーディオ演出 ---
         function playOcean() {
             if (state.audioCtx) return;
             state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -236,11 +227,16 @@
             setInterval(sweep, 9000); sweep();
         }
 
+        // --- イベント管理 ---
         document.getElementById('trigger-modal').onclick = () => {
-            document.getElementById('modal').classList.add('show');
+            document.getElementById('modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('modal').classList.add('show'), 10);
             playOcean();
         };
-        document.getElementById('close-modal').onclick = () => document.getElementById('modal').classList.remove('show');
+        document.getElementById('close-modal').onclick = () => {
+            document.getElementById('modal').classList.remove('show');
+            setTimeout(() => document.getElementById('modal').style.display = 'none', 800);
+        };
         
         window.addEventListener('resize', initSky);
         setInterval(() => {
